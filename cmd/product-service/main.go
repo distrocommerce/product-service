@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/distrocommerce/product-service/internal/config"
+	"github.com/distrocommerce/product-service/internal/store"
 )
 
 // version is set at build time: -ldflags "-X main.version=..."
@@ -37,8 +39,40 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Ctrl+C during migrations cancels them (ctx).
+	st, err := store.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer st.Close() // runs after the server has shut down
+
+	migrateCtx, cancelMigrate := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelMigrate()
+	if err := st.Migrate(migrateCtx, cfg.SeedLocalData); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+	log.Info("migrations applied", "local_data", cfg.SeedLocalData)
+
+	// True once the service can take traffic, false from shutdown on.
+	var ready atomic.Bool
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		if !ready.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable) // shutting down: no DB call
+			return
+		}
+		pingCtx, cancel := context.WithTimeout(r.Context(), 800*time.Millisecond) // < probe timeout (1 s)
+		defer cancel()
+		if err := st.Ping(pingCtx); err != nil {
+			log.Warn("readiness: database unavailable", "error", err)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -60,6 +94,8 @@ func run() error {
 		close(errCh)
 	}()
 
+	ready.Store(true)
+
 	select {
 	case err := <-errCh:
 		return fmt.Errorf("http server: %w", err)
@@ -67,6 +103,10 @@ func run() error {
 		stop() // a second signal now kills the process immediately
 		log.Info("shutdown started")
 	}
+
+	// Fail readiness first, then give the gateway time to stop routing here.
+	ready.Store(false)
+	time.Sleep(cfg.DrainDelay)
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()

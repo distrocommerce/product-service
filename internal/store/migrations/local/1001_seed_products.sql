@@ -1,0 +1,5 @@
+INSERT INTO products (id, name, description, price_minor, currency, attributes, created_at) VALUES
+                                                                                                ('019a7c10-0000-7000-8000-000000000001', 'Laptop 14"',    'Light everyday laptop', 129900, 'USD', '{"ram_gb": 16, "storage_gb": 512}', '2026-11-01 10:00:00+00'),
+                                                                                                ('019a7c10-0000-7000-8000-000000000002', 'Running shoes', 'Road running shoes',    8999,   'EUR', '{"size_eu": 42, "color": "black"}', '2026-11-02 10:00:00+00'),
+                                                                                                ('019a7c10-0000-7000-8000-000000000003', 'Coffee beans',  'Arabica, 1 kg',         54900,  'UAH', '{"weight_g": 1000}',                '2026-11-02 10:00:00+00')
+    ON CONFLICT (id) DO NOTHING;

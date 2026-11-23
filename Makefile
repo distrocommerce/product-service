@@ -25,5 +25,6 @@ test: ## vet + unit tests (set PRODUCT_TEST_DATABASE_URL to include the store te
 	go vet ./...
 	go test -race ./...
 
-run: ## locally on :8082, against localhost:5432, telemetry off
-	PORT=$(LOCAL_PORT) DATABASE_URL='$(LOCAL_DATABASE_URL)' LOG_LEVEL=debug OTEL_SDK_DISABLED=true go run ./cmd/product-service
+run: ## locally on :8082, against localhost:5432, telemetry off, local test data
+	PORT=$(LOCAL_PORT) DATABASE_URL='$(LOCAL_DATABASE_URL)' LOG_LEVEL=debug OTEL_SDK_DISABLED=true \
+	  SEED_LOCAL_DATA=true DRAIN_DELAY=0s go run ./cmd/product-service

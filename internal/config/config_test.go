@@ -23,6 +23,8 @@ func TestLoadDefaults(t *testing.T) {
 		LogExportLevel:  slog.LevelInfo,
 		ShutdownTimeout: 20 * time.Second,
 		MaxBodyBytes:    1 << 20,
+		SeedLocalData:   false,
+		DrainDelay:      5 * time.Second,
 	}
 	if cfg != want {
 		t.Errorf("got %+v, want %+v", cfg, want)
@@ -36,12 +38,17 @@ func TestLoadOverrides(t *testing.T) {
 		"LOG_LEVEL":        "debug",
 		"SHUTDOWN_TIMEOUT": "5s",
 		"MAX_BODY_BYTES":   "2048",
+		"SEED_LOCAL_DATA":  "true",
+		"DRAIN_DELAY":      "2s",
 	}))
+
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
+
 	if cfg.Port != 9090 || cfg.LogLevel != slog.LevelDebug ||
-		cfg.ShutdownTimeout != 5*time.Second || cfg.MaxBodyBytes != 2048 {
+		cfg.ShutdownTimeout != 5*time.Second || cfg.MaxBodyBytes != 2048 ||
+		!cfg.SeedLocalData || cfg.DrainDelay != 2*time.Second {
 		t.Errorf("unexpected config: %+v", cfg)
 	}
 }
@@ -63,6 +70,11 @@ func TestLoadInvalid(t *testing.T) {
 		{"timeout negative", map[string]string{"DATABASE_URL": "x", "SHUTDOWN_TIMEOUT": "-1s"}, "SHUTDOWN_TIMEOUT"},
 		{"body zero", map[string]string{"DATABASE_URL": "x", "MAX_BODY_BYTES": "0"}, "MAX_BODY_BYTES"},
 		{"body not a number", map[string]string{"DATABASE_URL": "x", "MAX_BODY_BYTES": "1MiB"}, "MAX_BODY_BYTES"},
+		{"seed not a bool", map[string]string{"DATABASE_URL": "x", "SEED_LOCAL_DATA": "yes"}, "SEED_LOCAL_DATA"},
+		{"drain negative", map[string]string{"DATABASE_URL": "x", "DRAIN_DELAY": "-1s"}, "DRAIN_DELAY"},
+		{"drain no unit", map[string]string{"DATABASE_URL": "x", "DRAIN_DELAY": "5"}, "DRAIN_DELAY"},
+		{"drain longer than shutdown", map[string]string{"DATABASE_URL": "x", "DRAIN_DELAY": "30s"}, "must be shorter than SHUTDOWN_TIMEOUT"},
+		{"drain equal to shutdown", map[string]string{"DATABASE_URL": "x", "DRAIN_DELAY": "20s"}, "must be shorter than SHUTDOWN_TIMEOUT"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -71,6 +83,16 @@ func TestLoadInvalid(t *testing.T) {
 				t.Fatalf("got error %v, want one containing %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestLoadDrainAndSeed(t *testing.T) {
+	cfg, err := Load(env(map[string]string{"DATABASE_URL": "x", "DRAIN_DELAY": "0s", "SEED_LOCAL_DATA": "1"}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DrainDelay != 0 || !cfg.SeedLocalData {
+		t.Errorf("DrainDelay = %v, SeedLocalData = %v; want 0 and true", cfg.DrainDelay, cfg.SeedLocalData)
 	}
 }
 

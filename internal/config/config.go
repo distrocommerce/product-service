@@ -18,6 +18,8 @@ type Config struct {
 	LogExportLevel  slog.Level // minimum level exported over OTLP; LogLevel applies to stdout
 	ShutdownTimeout time.Duration
 	MaxBodyBytes    int64
+	SeedLocalData   bool
+	DrainDelay      time.Duration
 }
 
 const (
@@ -25,7 +27,8 @@ const (
 	defaultLogLevel        = slog.LevelInfo
 	defaultLogExportLevel  = slog.LevelInfo
 	defaultShutdownTimeout = 20 * time.Second
-	defaultMaxBodyBytes    = 1 << 20 // 1 MiB
+	defaultMaxBodyBytes    = 1 << 20         // 1 MiB
+	defaultDrainDelay      = 5 * time.Second // time for Envoy to drop the pod before Shutdown
 )
 
 // Load reads the configuration through getenv (os.Getenv in production) and
@@ -37,6 +40,7 @@ func Load(getenv func(string) string) (Config, error) {
 		LogExportLevel:  defaultLogExportLevel,
 		ShutdownTimeout: defaultShutdownTimeout,
 		MaxBodyBytes:    defaultMaxBodyBytes,
+		DrainDelay:      defaultDrainDelay,
 	}
 
 	var errs []error
@@ -82,6 +86,28 @@ func Load(getenv func(string) string) (Config, error) {
 		} else {
 			cfg.MaxBodyBytes = n
 		}
+	}
+
+	if v := getenv("SEED_LOCAL_DATA"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("SEED_LOCAL_DATA: %q is not a boolean", v))
+		} else {
+			cfg.SeedLocalData = b
+		}
+	}
+
+	if v := getenv("DRAIN_DELAY"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 0 {
+			errs = append(errs, fmt.Errorf("DRAIN_DELAY: %q is not a non-negative duration", v))
+		} else {
+			cfg.DrainDelay = d
+		}
+	}
+
+	if cfg.DrainDelay >= cfg.ShutdownTimeout {
+		errs = append(errs, fmt.Errorf("DRAIN_DELAY (%s) must be shorter than SHUTDOWN_TIMEOUT (%s)", cfg.DrainDelay, cfg.ShutdownTimeout))
 	}
 
 	if len(errs) > 0 {
